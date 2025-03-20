@@ -1,0 +1,7 @@
+/zig-cache
+/zig-out
+.DS_Store
+.vscode
+.zig-cache
+test-cases
+.ignore
