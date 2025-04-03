@@ -23,9 +23,47 @@ fn dft(sample: []f32, freqs: []f32, amplitudes: []f32) !void {
     }
 }
 
+fn burgs_method(sample: []f32, coefficients: []f32, ally: std.mem.Allocator) !void {
+    const F = ally.alloc(f32, coefficients.size);
+    const B = ally.alloc(f32, coefficients.size);
+    for (&coefficients) |*coefficient| {
+        coefficient.* = 0;
+    }
+    coefficients[0] = 1;
+    for (&F, &B, sample) |*f, *b, amplitude| {
+        f.* = amplitude;
+        b.* = amplitude;
+    }
+
+    var Dk: f32 = -sample[0] * sample[0] - sample[sample.len - 1] * sample[sample.len - 1];
+    for (F) |f| {
+        Dk += 2 * f * f;
+    }
+    for (0..coefficients.len - 1) |k| {
+        var mu: f32 = 0;
+        for (0..sample.len - k - 2, B) |n, b| {
+            mu += F[n + k + 1] * b;
+        }
+        mu *= -2 / Dk;
+        for (0..(k + 1) / 2) |n| {
+            const delta1: f32 = mu * coefficients[k + 1 - n];
+            const delta2: f32 = mu * coefficients[n];
+            coefficients[n] += delta1;
+            coefficients[k + 1 - n] += delta2;
+        }
+        for (0..sample.len - k - 2) |n| {
+            const delta1 = mu * B[n];
+            const delta2 = mu * F[n + k + 1];
+            F[n + k + 1] += delta1;
+            B[n] += delta2;
+        }
+        Dk = (1.0 - mu * mu) * Dk - F[k + 1] * F[k + 1] - B[sample.len - k - 2] * B[sample.len - k - 2];
+    }
+}
+
 pub fn main() !void {
     const ally = std.heap.page_allocator;
-    const file = try std.fs.cwd().openFile("test-cases/ooo.wav", .{});
+    const file = try std.fs.cwd().openFile("test-cases/ee.wav", .{});
     defer file.close();
 
     var reader = std.io.bufferedReader(file.reader());
@@ -33,7 +71,7 @@ pub fn main() !void {
 
     // RATE samples for 1 second of audio
     // two channels
-    var data: [RATE * 2]f32 = undefined;
+    var data: [RATE / 20]f32 = undefined; // 1s / 20 = 50ms per frame
     var freqs = [_]f32{ 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, 2500 };
     const amplitudes = try ally.alloc(f32, freqs.len);
     const log_amplitudes = try ally.alloc(f32, freqs.len);
@@ -43,12 +81,8 @@ pub fn main() !void {
     var index: usize = 0;
     while (true) {
         index += 1;
-        // un-interleave
-        for (0..44100) |i| {
-            data[i] = data[2 * i];
-        }
         const samples_read = try decoder.read(f32, &data);
-        try dft(data[0..44100], &freqs, amplitudes);
+        try dft(data[0..samples_read], &freqs, amplitudes);
 
         var min_log_amplitude: f32 = 100;
         for (amplitudes, 0..) |amplitude, i| {
@@ -61,7 +95,7 @@ pub fn main() !void {
             log_amplitude.* -= min_log_amplitude;
         }
 
-        std.debug.print("t = {}s\n", .{index});
+        std.debug.print("t = {}ms\n", .{index * 50});
         for (freqs, log_amplitudes) |freq, amp| {
             const freq_as_int: u128 = @intFromFloat(freq);
             std.debug.print("{}: ", .{freq_as_int});
@@ -75,7 +109,6 @@ pub fn main() !void {
         if (samples_read < data.len) {
             break;
         }
-        break;
     }
 
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
