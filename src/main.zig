@@ -62,7 +62,7 @@ fn burgs_method(sample: []f32, coefficients: []f32, ally: std.mem.Allocator) !vo
     }
 }
 
-extern fn cgeev_(_: u8, _: u8, _: i32, _: *f32, _: i32, _: *f32) void;
+extern fn cgeev_(_: u8, _: u8, _: i32, _: [*]f32, _: i32, _: [*]f32) void;
 // Find the complex roots of polynomial by finding the eigenvalues of the companion matrix
 fn roots(coefficients: []f32, ally: std.mem.Allocator) !void {
     // column major
@@ -83,7 +83,7 @@ fn roots(coefficients: []f32, ally: std.mem.Allocator) !void {
         companion[2 * (coefficients.len * (coefficients.len - 1) + i)] = -coefficients[i];
         eigenvalues[i] = 0;
     }
-    cgeev_('N', 'N', @intCast(coefficients.len), companion, @intCast(coefficients.len), eigenvalues);
+    cgeev_('N', 'N', @intCast(coefficients.len), companion.ptr, @intCast(coefficients.len), eigenvalues.ptr);
 }
 
 pub fn main() !void {
