@@ -1,6 +1,3 @@
-//! By convention, main.zig is where your main function lives in the case that
-//! you are building an executable. If you are making a library, the convention
-//! is to delete this file and start with root.zig instead.
 const std = @import("std");
 const wav = @import("wav");
 
@@ -23,35 +20,39 @@ fn dft(sample: []f32, freqs: []f32, amplitudes: []f32) !void {
     }
 }
 
+// Solve the autoregressive model using Burg's method to find the LPC coefficients
 fn burgs_method(sample: []f32, coefficients: []f32, ally: std.mem.Allocator) !void {
-    const F = ally.alloc(f32, coefficients.size);
-    const B = ally.alloc(f32, coefficients.size);
-    for (&coefficients) |*coefficient| {
+    const F = try ally.alloc(f32, sample.len);
+    const B = try ally.alloc(f32, sample.len);
+    defer ally.free(F);
+    defer ally.free(B);
+    for (coefficients) |*coefficient| {
         coefficient.* = 0;
     }
     coefficients[0] = 1;
-    for (&F, &B, sample) |*f, *b, amplitude| {
+    for (F, B, sample) |*f, *b, amplitude| {
         f.* = amplitude;
         b.* = amplitude;
     }
 
-    var Dk: f32 = -sample[0] * sample[0] - sample[sample.len - 1] * sample[sample.len - 1];
+    var Dk: f32 = 0;
     for (F) |f| {
         Dk += 2 * f * f;
     }
+    Dk -= sample[0] * sample[0] + sample[sample.len - 1] * sample[sample.len - 1];
     for (0..coefficients.len - 1) |k| {
         var mu: f32 = 0;
-        for (0..sample.len - k - 2, B) |n, b| {
-            mu += F[n + k + 1] * b;
+        for (0..sample.len - k - 1) |n| {
+            mu += F[n + k + 1] * B[n];
         }
         mu *= -2 / Dk;
-        for (0..(k + 1) / 2) |n| {
-            const delta1: f32 = mu * coefficients[k + 1 - n];
-            const delta2: f32 = mu * coefficients[n];
-            coefficients[n] += delta1;
-            coefficients[k + 1 - n] += delta2;
+        for (0..(k + 1) / 2 + 1) |n| {
+            const t1: f32 = coefficients[n] + mu * coefficients[k + 1 - n];
+            const t2: f32 = coefficients[k + 1 - n] + mu * coefficients[n];
+            coefficients[n] = t1;
+            coefficients[k + 1 - n] = t2;
         }
-        for (0..sample.len - k - 2) |n| {
+        for (0..sample.len - k - 1) |n| {
             const delta1 = mu * B[n];
             const delta2 = mu * F[n + k + 1];
             F[n + k + 1] += delta1;
@@ -61,9 +62,55 @@ fn burgs_method(sample: []f32, coefficients: []f32, ally: std.mem.Allocator) !vo
     }
 }
 
+extern fn cgeev_(_: u8, _: u8, _: i32, _: *f32, _: i32, _: *f32) void;
+// Find the complex roots of polynomial by finding the eigenvalues of the companion matrix
+fn roots(coefficients: []f32, ally: std.mem.Allocator) !void {
+    // column major
+    var companion: []f32 = try ally.alloc(f32, 2 * coefficients.len * coefficients.len);
+    var eigenvalues: []f32 = try ally.alloc(f32, 2 * coefficients.len);
+    defer ally.free(companion);
+    defer ally.free(eigenvalues);
+    for (companion) |*data| {
+        data.* = 0;
+    }
+    for (0..coefficients.len - 1) |i| {
+        // column i, row i + 1
+        companion[2 * (i * coefficients.len + (i + 1))] = 1;
+    }
+
+    for (0..coefficients.len) |i| {
+        // Always final column, all rows
+        companion[2 * (coefficients.len * (coefficients.len - 1) + i)] = -coefficients[i];
+        eigenvalues[i] = 0;
+    }
+    cgeev_('N', 'N', @intCast(coefficients.len), companion, @intCast(coefficients.len), eigenvalues);
+}
+
 pub fn main() !void {
     const ally = std.heap.page_allocator;
-    const file = try std.fs.cwd().openFile("test-cases/ee.wav", .{});
+    const file = try std.fs.cwd().openFile("test-cases/ee-norm-mono.wav", .{});
+    defer file.close();
+    var reader = std.io.bufferedReader(file.reader());
+    var decoder = try wav.decoder(reader.reader());
+    var data: [RATE / 20]f32 = undefined; // 1s / 20 = 50ms per frame
+    var index: usize = 0;
+
+    // lpc coefficients
+    var coefficients: [50]f32 = undefined;
+    while (true) {
+        const samples_read = try decoder.read(f32, &data);
+        try burgs_method(&data, &coefficients, ally);
+        try roots(&coefficients, ally);
+        index += 1;
+        if (samples_read < data.len) {
+            break;
+        }
+    }
+}
+
+pub fn main_dft() !void {
+    const ally = std.heap.page_allocator;
+    const file = try std.fs.cwd().openFile("test-cases/ee-norm-mono.wav", .{});
     defer file.close();
 
     var reader = std.io.bufferedReader(file.reader());
@@ -110,35 +157,4 @@ pub fn main() !void {
             break;
         }
     }
-
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
-
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
-
-    try bw.flush(); // Don't forget to flush!
-}
-
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
-
-test "fuzz example" {
-    const global = struct {
-        fn testOne(input: []const u8) anyerror!void {
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
-    };
-    try std.testing.fuzz(global.testOne, .{});
 }
