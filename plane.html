@@ -1,0 +1,55 @@
+<html>
+    <head>
+        <script>
+            const importObject = {
+                my_namespace: {
+                    imported_func: arg => {
+                        console.log(arg);
+                    }
+                }
+            };
+            loadWasm = (obj) => {
+                console.log(obj);
+                window.burgs_method = obj.burgs_method;
+            }
+            burgs_method = undefined;
+            WebAssembly.instantiateStreaming(fetch("formant-finder.wasm"), importObject).then(x => {
+                window.ar = x;
+                window.burgs_method = x.instance.exports.burgs_method;
+            }).then(() => {
+                navigator.mediaDevices.getUserMedia({
+                    audio: true,
+                    sampleRate: 44100,
+                    noiseSuppression: false,
+                }).then(processAudio).catch(console.log);
+            });
+
+            function processAudio(stream) {
+                const audioCtx = new AudioContext();
+                const analyser = audioCtx.createAnalyser();
+                audioCtx.createMediaStreamSource(stream).connect(analyser);
+                const data_ptr = ar.instance.exports.alloc(44100 / 2);
+                const coefficients_ptr = ar.instance.exports.alloc(50);
+                const formants_ptr = ar.instance.exports.alloc(2);
+
+                cleanup = () => {
+                    ar.instance.exports.free(data_ptr);
+                    ar.instance.exports.free(coefficients_ptr);
+                };
+
+                setInterval(() => {
+                    const ar = window.ar;
+                    const data_size = 44100 / 2 * 4;
+                    const data = new Float32Array(ar.instance.exports.memory.buffer, data_ptr, 44100 / 2);
+                    const coefficients = new Float32Array(ar.instance.exports.memory.buffer, coefficients_ptr, 45);
+                    const formants = new Float32Array(ar.instance.exports.memory.buffer, formants_ptr, 2);
+
+
+                    analyser.getFloatTimeDomainData(data);
+                    burgs_method(data_ptr, coefficients_ptr, formants_ptr, 44100 / 2, 40);
+                    console.log("formants", `${Math.round(formants[0])}Hz`, `${Math.round(formants[1])}Hz`);
+                }, 500);
+            };
+        </script>
+    </head>
+</html>
