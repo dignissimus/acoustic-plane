@@ -1,5 +1,6 @@
 const std = @import("std");
 const wav = @import("wav");
+const zpoly = @import("zpoly");
 
 const E: std.math.complex.Complex(f32) = .{ .re = std.math.e, .im = 0 };
 const I: std.math.complex.Complex(f32) = .{ .re = 0, .im = 1 };
@@ -62,30 +63,6 @@ fn burgs_method(sample: []f32, coefficients: []f32, ally: std.mem.Allocator) !vo
     }
 }
 
-extern fn cgeev_(_: u8, _: u8, _: i32, _: [*]f32, _: i32, _: [*]f32) void;
-// Find the complex roots of polynomial by finding the eigenvalues of the companion matrix
-fn roots(coefficients: []f32, ally: std.mem.Allocator) !void {
-    // column major
-    var companion: []f32 = try ally.alloc(f32, 2 * coefficients.len * coefficients.len);
-    var eigenvalues: []f32 = try ally.alloc(f32, 2 * coefficients.len);
-    defer ally.free(companion);
-    defer ally.free(eigenvalues);
-    for (companion) |*data| {
-        data.* = 0;
-    }
-    for (0..coefficients.len - 1) |i| {
-        // column i, row i + 1
-        companion[2 * (i * coefficients.len + (i + 1))] = 1;
-    }
-
-    for (0..coefficients.len) |i| {
-        // Always final column, all rows
-        companion[2 * (coefficients.len * (coefficients.len - 1) + i)] = -coefficients[i];
-        eigenvalues[i] = 0;
-    }
-    cgeev_('N', 'N', @intCast(coefficients.len), companion.ptr, @intCast(coefficients.len), eigenvalues.ptr);
-}
-
 pub fn main() !void {
     const ally = std.heap.page_allocator;
     const file = try std.fs.cwd().openFile("test-cases/ee-norm-mono.wav", .{});
@@ -97,14 +74,31 @@ pub fn main() !void {
 
     // lpc coefficients
     var coefficients: [50]f32 = undefined;
+    var roots: [49]std.math.Complex(f32) = undefined;
+    var formants: [49]f32 = undefined;
+    var is_good: [49]bool = undefined;
     while (true) {
         const samples_read = try decoder.read(f32, &data);
         try burgs_method(&data, &coefficients, ally);
-        try roots(&coefficients, ally);
         index += 1;
         if (samples_read < data.len) {
             break;
         }
+        try zpoly.roots(f32, ally, &coefficients, &roots);
+        for (roots, &is_good) |r, *ig| {
+            ig.* = r.im > 0;
+        }
+        for (&roots, &formants, is_good) |*r, *f, ig| {
+            const bandwidth = -1 / 2 * RATE / (2 * std.math.pi) * std.math.log(f32, std.math.e, std.math.complex.abs(r.*));
+            const formant = std.math.complex.arg(r.*) / (2 * std.math.pi) * RATE;
+            if (ig and bandwidth < 400 and formant > 90) {
+                f.* = formant;
+            } else {
+                f.* = std.math.inf(f32);
+            }
+        }
+        std.mem.sort(f32, &formants, {}, comptime std.sort.asc(f32));
+        std.debug.print("{}Hz, {}Hz\n", .{ formants[0], formants[1] });
     }
 }
 

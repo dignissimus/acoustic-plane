@@ -52,7 +52,14 @@
         //    .lazy = false,
         //},
         //.{
-        .zig_wav = .{ .url = "git+https://github.com/dignissimus/zig-wav/#71d24a90f142e8dfa5899a8ecae969f5b61f94a7", .hash = "zig_wav-0.0.0-JtTse0N3AACGxehjfM2bJ_SZ1jA5oTaJHjDkeL2aPS5d", },
+        .zig_wav = .{
+            .url = "git+https://github.com/dignissimus/zig-wav/#71d24a90f142e8dfa5899a8ecae969f5b61f94a7",
+            .hash = "zig_wav-0.0.0-JtTse0N3AACGxehjfM2bJ_SZ1jA5oTaJHjDkeL2aPS5d",
+        },
+        .zpoly = .{
+            .url = "git+https://github.com/dignissimus/zpoly#16896b289d45d948c585e9667eace3b107c107f9",
+            .hash = "zpoly-0.0.0-3TQXd9OIAQA4syqO15qOEp3tEFauNdqUK0dShrp236_7",
+        },
     },
 
     // Specifies the set of files and directories that are included in this package.

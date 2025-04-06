@@ -40,6 +40,10 @@ pub fn build(b: *std.Build) void {
     const wav_module = wav_dep.module("wav");
     exe.root_module.addImport("wav", wav_module);
 
+    const zpoly_dep = b.dependency("zpoly", .{ .target = target, .optimize = optimize });
+    const zpoly_module = zpoly_dep.module("zpoly_import_name");
+    exe.root_module.addImport("zpoly", zpoly_module);
+
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
