@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const wav_dep = b.dependency("wav", .{ .target = target, .optimize = optimize });
+    const wav_dep = b.dependency("zig_wav", .{ .target = target, .optimize = optimize });
     const wav_module = wav_dep.module("wav");
     exe.root_module.addImport("wav", wav_module);
 
