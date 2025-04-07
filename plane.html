@@ -1,6 +1,146 @@
+<!DOCTYPE html>
 <html>
     <head>
+        <meta charset="utf-8">
+        <title>Real-time Formant Plot</title>
+        <script src="https://d3js.org/d3.v7.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&display=swap');
+            html {
+              font-family: Roboto, sans-serif;
+            }
+
+            h3 {
+                text-align: center;
+            }
+            body {
+              background: #e0f7fa;
+              margin: 0;
+              padding: 20px;
+              color: #333;
+            }
+            header {
+              text-align: center;
+              margin-bottom: 20px;
+            }
+            h1 {
+              font-size: 2em;
+              margin: 0.5em 0;
+              color: #006064;
+            }
+            p {
+              font-size: 1em;
+              color: #555;
+            }
+            svg {
+              display: block;
+              margin: auto;
+              background-color: #fff;
+              box-shadow: 0px 4px 6px rgba(0,0,0,0.1);
+            }
+            .axis path, .axis line {
+              fill: none;
+              stroke: #333;
+              shape-rendering: crispEdges;
+            }
+            .axis-label {
+              fill: #333;
+              font-size: 14px;
+              font-weight: bold;
+            }
+            .grid line {
+              stroke: #aaa;
+              stroke-opacity: 0.3;
+              shape-rendering: crispEdges;
+            }
+            .grid path {
+              stroke-width: 0;
+            }
+            .dot {
+              fill: #d32f2f;
+              stroke: #fff;
+              stroke-width: 1.5px;
+            }
+        </style>
+    </head>
+
+    <body>
+        <h3>Live Vowel Formant Plot</h3>
+        <svg width="600" height="500"></svg>
+
         <script>
+            const rms = (snippet) => {
+              let sum = 0;
+              for (let i = 0; i < snippet.length; i++) {
+                sum += snippet[i] * snippet[i];
+              }
+              return Math.sqrt(sum / snippet.length);
+            }
+
+            const svg = d3.select("svg");
+            const width = +svg.attr("width");
+            const height = +svg.attr("height");
+            const margin = {
+                top: 20,
+                right: 20,
+                bottom: 40,
+                left: 40
+            };
+            const chartWidth = width - margin.left - margin.right;
+            const chartHeight = height - margin.top - margin.bottom;
+
+            const chart = svg.append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            const xScale = d3.scaleLinear().domain([400, 2500]).range([chartWidth, 0]);
+            const yScale = d3.scaleLinear().domain([100, 1000]).range([0, chartHeight]);
+
+            const xAxis = d3.axisBottom(xScale).ticks(5);
+            const yAxis = d3.axisLeft(yScale).ticks(5);
+
+            const makeXGridlines = () => d3.axisBottom(xScale).ticks(5);
+            const makeYGridlines = () => d3.axisLeft(yScale).ticks(5);
+
+            chart.append("g")
+                 .attr("class", "grid")
+                 .attr("transform", `translate(0,${chartHeight})`)
+                 .call(makeXGridlines()
+                     .tickSize(-chartHeight)
+                     .tickFormat(""));
+
+            chart.append("g")
+                 .attr("class", "grid")
+                 .call(makeYGridlines()
+                     .tickSize(-chartWidth)
+                     .tickFormat(""));
+
+
+            chart.append("g")
+                .attr("transform", `translate(0,${chartHeight})`)
+                .call(xAxis)
+                .append("text")
+                .attr("class", "axis-label")
+                .attr("x", chartWidth / 2)
+                .attr("y", 35)
+                .text("F2");
+
+            chart.append("g")
+                .call(yAxis)
+                .append("text")
+                .attr("class", "axis-label")
+                .attr("transform", "rotate(-90)")
+                .attr("x", -chartHeight / 2)
+                .attr("y", -35)
+                .text("F1");
+
+            const dot = chart.append("circle")
+                .attr("class", "dot")
+                .attr("r", 8)
+                .style("opacity", 0);
+
+            window.dot = dot;
+
             const importObject = {
                 my_namespace: {
                     imported_func: arg => {
@@ -8,48 +148,56 @@
                     }
                 }
             };
-            loadWasm = (obj) => {
-                console.log(obj);
-                window.burgs_method = obj.burgs_method;
-            }
-            burgs_method = undefined;
+
             WebAssembly.instantiateStreaming(fetch("formant-finder.wasm"), importObject).then(x => {
                 window.ar = x;
                 window.burgs_method = x.instance.exports.burgs_method;
-            }).then(() => {
-                navigator.mediaDevices.getUserMedia({
-                    audio: true,
-                    sampleRate: 44100,
-                    noiseSuppression: false,
-                }).then(processAudio).catch(console.log);
-            });
+            }).then(() => start(dot));
 
-            function processAudio(stream) {
-                const audioCtx = new AudioContext();
-                const analyser = audioCtx.createAnalyser();
-                audioCtx.createMediaStreamSource(stream).connect(analyser);
-                const data_ptr = ar.instance.exports.alloc(44100 / 2);
-                const coefficients_ptr = ar.instance.exports.alloc(50);
+            const start = async (dot) => {
+                const audioContext = new AudioContext();
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioContext.createMediaStreamSource(stream);
+                await audioContext.audioWorklet.addModule('processor.js');
+                const workletNode = new AudioWorkletNode(audioContext, 'processor');
+                source.connect(workletNode);
+
+                const ORDER = 50;
+                const MAX_DATA_SIZE = 88200;
+
+
+                const data_ptr = ar.instance.exports.alloc(MAX_DATA_SIZE);
+                const coefficients_ptr = ar.instance.exports.alloc(ORDER);
                 const formants_ptr = ar.instance.exports.alloc(2);
 
-                cleanup = () => {
-                    ar.instance.exports.free(data_ptr);
-                    ar.instance.exports.free(coefficients_ptr);
-                };
+                workletNode.port.onmessage = (event) => {
+                    if (rms(event.data) < 0.02) return;
+                    data_size = Math.min(MAX_DATA_SIZE, event.data.length)
 
-                setInterval(() => {
-                    const ar = window.ar;
-                    const data_size = 44100 / 2 * 4;
-                    const data = new Float32Array(ar.instance.exports.memory.buffer, data_ptr, 44100 / 2);
-                    const coefficients = new Float32Array(ar.instance.exports.memory.buffer, coefficients_ptr, 45);
+                    const data = new Float32Array(ar.instance.exports.memory.buffer, data_ptr, MAX_DATA_SIZE);
                     const formants = new Float32Array(ar.instance.exports.memory.buffer, formants_ptr, 2);
+                    for (i = 0; i < event.data.length; ++i) {
+                        data[i] = event.data[i];
+                    }
 
+                    // hamming window
+                    for (let i = 0; i < data.length; i++) {
+                        const w = 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (data.length - 1));
+                        data[i] *= w;
+                    }
 
-                    analyser.getFloatTimeDomainData(data);
-                    burgs_method(data_ptr, coefficients_ptr, formants_ptr, 44100 / 2, 40);
-                    console.log("formants", `${Math.round(formants[0])}Hz`, `${Math.round(formants[1])}Hz`);
-                }, 500);
-            };
+                    burgs_method(data_ptr, coefficients_ptr, formants_ptr, data_size, ORDER);
+
+                    const f1 = Math.round(formants[0]);
+                    const f2 = Math.round(formants[1]);
+                    window.dot.transition()
+                        .duration(50)
+                        .attr("cx", xScale(f2))
+                        .attr("cy", yScale(f1))
+                        .style("opacity", 1);
+                };
+            }
+            start();
         </script>
-    </head>
+    </body>
 </html>
