@@ -1,4 +1,4 @@
-const INTERVAL = 200;
+const INTERVAL = 50;
 
 class Processor extends AudioWorkletProcessor {
   constructor() {

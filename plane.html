@@ -6,6 +6,7 @@
         <script src="https://d3js.org/d3.v7.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
         <style>
+
             @import url('https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&display=swap');
             html {
               font-family: Roboto, sans-serif;
@@ -154,29 +155,40 @@
                 window.burgs_method = x.instance.exports.burgs_method;
             }).then(() => start(dot));
 
+
+            const f1Buffer = [];
+            const f2Buffer = [];
+
             const start = async (dot) => {
                 const audioContext = new AudioContext();
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: true,
+                    echoCancellation: false,
+                    noiseSuppresion: false,
+                    channelCount: 1,
+                    sampleRate: 44100,
+                });
                 const source = audioContext.createMediaStreamSource(stream);
                 await audioContext.audioWorklet.addModule('processor.js');
                 const workletNode = new AudioWorkletNode(audioContext, 'processor');
                 source.connect(workletNode);
+                workletNode.connect(audioContext.destination);
 
                 const ORDER = 50;
                 const MAX_DATA_SIZE = 88200;
-
+                const MAX_BUFFER = 20;
 
                 const data_ptr = ar.instance.exports.alloc(MAX_DATA_SIZE);
                 const coefficients_ptr = ar.instance.exports.alloc(ORDER);
                 const formants_ptr = ar.instance.exports.alloc(2);
 
                 workletNode.port.onmessage = (event) => {
-                    if (rms(event.data) < 0.02) return;
+                    if (rms(event.data) < 0.01) return;
                     data_size = Math.min(MAX_DATA_SIZE, event.data.length)
 
-                    const data = new Float32Array(ar.instance.exports.memory.buffer, data_ptr, MAX_DATA_SIZE);
+                    const data = new Float32Array(ar.instance.exports.memory.buffer, data_ptr, data_size);
                     const formants = new Float32Array(ar.instance.exports.memory.buffer, formants_ptr, 2);
-                    for (i = 0; i < event.data.length; ++i) {
+                    for (i = 0; i < data_size; ++i) {
                         data[i] = event.data[i];
                     }
 
@@ -190,10 +202,20 @@
 
                     const f1 = Math.round(formants[0]);
                     const f2 = Math.round(formants[1]);
+
+                    f1Buffer.push(f1);
+                    f2Buffer.push(f2);
+                    if (f1Buffer.length > MAX_BUFFER) f1Buffer.shift();
+                    if (f2Buffer.length > MAX_BUFFER) f2Buffer.shift();
+
+                    const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+                    const averageF1 = avg(f1Buffer);
+                    const averageF2 = avg(f2Buffer);
+
                     window.dot.transition()
-                        .duration(50)
-                        .attr("cx", xScale(f2))
-                        .attr("cy", yScale(f1))
+                        .duration(25)
+                        .attr("cx", xScale(averageF2))
+                        .attr("cy", yScale(averageF1))
                         .style("opacity", 1);
                 };
             }
