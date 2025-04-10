@@ -176,7 +176,7 @@
 
                 const ORDER = 50;
                 const MAX_DATA_SIZE = 88200;
-                const MAX_BUFFER = 20;
+                const MAX_BUFFER = 10;
 
                 const data_ptr = ar.instance.exports.alloc(MAX_DATA_SIZE);
                 const coefficients_ptr = ar.instance.exports.alloc(ORDER);
@@ -202,9 +202,10 @@
 
                     const f1 = Math.round(formants[0]);
                     const f2 = Math.round(formants[1]);
-
-                    f1Buffer.push(f1);
-                    f2Buffer.push(f2);
+                    if (isFinite(f1) || isFinite(f2)) {
+                        f1Buffer.push(f1);
+                        f2Buffer.push(f2);
+                    }
                     if (f1Buffer.length > MAX_BUFFER) f1Buffer.shift();
                     if (f2Buffer.length > MAX_BUFFER) f2Buffer.shift();
 
@@ -219,7 +220,7 @@
                         .style("opacity", 1);
                 };
             }
-            start();
         </script>
+        <button onclick="start()">Start demo</button>
     </body>
 </html>
